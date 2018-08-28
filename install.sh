@@ -109,7 +109,7 @@ terraform apply -var "istio_project=${ISTIO_PROJECT}" \
   -var "istio_subnet_cidr=${ISTIO_SUBNET_CIDR}" \
   -var "istio_subnet_cluster_cidr=${ISTIO_SUBNET_CLUSTER_CIDR}" \
   -var "istio_subnet_services_cidr=${ISTIO_SUBNET_SERVICES_CIDR}" \
-  -var "gce_vm=${GCE_VM}"
+  -var "gce_vm=${GCE_VM}" --auto-approve
 
 # Check for required Istio components and download if necessary
 if [[ ! -d "$(pwd)/istio-${ISTIO_VERSION}" ]]; then
@@ -159,9 +159,9 @@ export SERVICE_NAMESPACE=vm
 ./install/tools/setupMeshEx.sh generateClusterEnv "${ISTIO_CLUSTER}"
 
 # Turn off the Istio auth to prevent auth issues
-if [[ "${ISTIO_AUTH_POLICY}" == "NONE" ]] ; then
-  sed -i'' -e "s/CONTROL_PLANE_AUTH_POLICY=MUTUAL_TLS/CONTROL_PLANE_AUTH_POLICY=${ISTIO_AUTH_POLICY}/g" cluster.env
-fi
+#if [[ "${ISTIO_AUTH_POLICY}" == "NONE" ]] ; then
+sed -i'' -e "s/CONTROL_PLANE_AUTH_POLICY=MUTUAL_TLS/CONTROL_PLANE_AUTH_POLICY=NONE/g" cluster.env
+#fi
 
 # Generate the DNS configuration necessary to have the GCE VM join the mesh.
 ./install/tools/setupMeshEx.sh generateDnsmasq
@@ -184,16 +184,20 @@ istioctl register -n vm mysqldb "$(gcloud compute instances describe "${GCE_VM}"
 # Install the bookinfo services and deployments and set up the initial Istio
 # routing. For more information on routing see this Istio blog post:
 # https://istio.io/blog/2018/v1alpha3-routing/
-kubectl apply -f <(istioctl kube-inject -f ./samples/bookinfo/kube/bookinfo.yaml)
-kubectl apply -f <(istioctl kube-inject -f ./samples/bookinfo/kube/bookinfo-ratings-v2-mysql-vm.yaml)
-istioctl create -f ./samples/bookinfo/routing/bookinfo-gateway.yaml
-istioctl create -f ./samples/bookinfo/routing/route-rule-all-v1.yaml
+kubectl apply -f <(istioctl kube-inject -f ./samples/bookinfo/platform/kube/bookinfo.yaml)
+kubectl apply -f <(istioctl kube-inject -f ./samples/bookinfo/platform/kube/bookinfo-ratings-v2-mysql-vm.yaml)
+istioctl create -f ./samples/bookinfo/networking/bookinfo-gateway.yaml
+istioctl create -f ./samples/bookinfo/networking/virtual-service-all-v1.yaml
 
 # Change the routing to point to the most recent versions of the bookinfo
 # microservices
-istioctl replace -f ./samples/bookinfo/routing/route-rule-ratings-mysql-vm.yaml
-istioctl replace -f ./samples/bookinfo/routing/route-rule-reviews-v3.yaml
-
+istioctl replace -f ./samples/bookinfo/networking/virtual-service-ratings-mysql-vm.yaml
+istioctl replace -f ./samples/bookinfo/networking/virtual-service-reviews-v3.yaml
+kubectl apply -f ./samples/bookinfo/networking/destination-rule-all.yaml                                                                                                                                              
+kubectl apply -f ./samples/bookinfo/networking/virtual-service-all-v1.yaml                                                                                                                                            
+istioctl kube-inject -n bookinfo -f ./samples/bookinfo/platform/kube/bookinfo-ratings-v2-mysql-vm.yaml | kubectl apply -n bookinfo -f -                                                                               
+kubectl apply -n bookinfo -f ./samples/bookinfo/networking/virtual-service-ratings-mysql-vm.yaml                                                                                                                      
+kubectl apply -f ./samples/bookinfo/networking/virtual-service-reviews-v3.yaml
 popd || exit
 
 # Install and deploy the database used by the Istio service
